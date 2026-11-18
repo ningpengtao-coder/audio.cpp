@@ -609,7 +609,7 @@ private:
         auto * beta = modules::SigmoidModule().build(ctx, matrix(rows(4 * I + H, H))).tensor;
         decay = ggml_reshape_4d(g, decay, 1, H, T, B);
         beta = ggml_reshape_4d(g, beta, 1, H, T, B);
-        auto * packed = ggml_gated_delta_net(g, q, k, v, decay, beta, state);  // [I, N + S*B]
+        auto * packed = ggml_gated_delta_net(g, q, k, v, decay, beta, state, /*K=*/1);  // [I, N + S*B]
         auto * output = ggml_view_2d(g, packed, I, N, static_cast<size_t>(I) * sizeof(float), 0);
         auto * next_state = ggml_view_1d(g, packed, ggml_nelements(state), static_cast<size_t>(I) * N * sizeof(float));
         auto * next_history = ggml_cont(g, ggml_view_3d(g, window, R, 3 * I, B, window->nb[1], window->nb[2],

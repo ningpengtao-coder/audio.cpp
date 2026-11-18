@@ -259,7 +259,7 @@ private:
                 16 * sizeof(float), parameters.tensor->nb[1], parameters.tensor->nb[2], 20 * sizeof(float));
             scan = ggml_ssm_scan(ctx_.ggml, initial,
                 core::reshape_tensor(ctx_, value, TensorShape::from_dims({batch, length, 256, 1})).tensor,
-                delta.tensor, weights_.at(prefix + ".A_log").tensor, b, c, ids);
+                delta.tensor, weights_.at(prefix + ".A_log").tensor, b, c, ids, /*K=*/1);
         }
         if (streaming_ && temporal) {
             auto * final = ggml_view_4d(ctx_.ggml, scan, 16, 1, 256, batch,

@@ -154,7 +154,7 @@ KdaOutput build_kda(core::ModuleBuildContext & ctx, const core::TensorValue & in
     const auto beta = modules::Bf16RoundModule{}.build(ctx,
         modules::SliceModule({2, 5 * width, c.heads}).build(ctx, projected));
     auto * b = ggml_reshape_4d(ctx.ggml, ggml_sigmoid(ctx.ggml, beta.tensor), 1, c.heads, steps, 1);
-    auto * delta = ggml_gated_delta_net(ctx.ggml, query, key, qkv[2], g, b, state.tensor);
+    auto * delta = ggml_gated_delta_net(ctx.ggml, query, key, qkv[2], g, b, state.tensor, /*K=*/1);
     auto * output = ggml_view_2d(ctx.ggml, delta, width, steps, width * sizeof(float), 0);
     auto hidden = core::wrap_tensor(ggml_reshape_2d(ctx.ggml, output, c.head_dim, steps * c.heads),
         core::TensorShape::from_dims({steps * c.heads, c.head_dim}));

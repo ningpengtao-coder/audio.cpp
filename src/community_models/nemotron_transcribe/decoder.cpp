@@ -265,7 +265,7 @@ ggml_tensor * build_mamba(ggml_context * g, ggml_cgraph * graph, ggml_tensor * i
     dt = ggml_add(g, ggml_cont(g, dt), w.dt_bias);
     // Stock seven-argument GGML scan returns y followed by the final F32 state.
     // GGUF ssm_a already contains -exp(A_log), so no second transform belongs here.
-    auto * scan = ggml_ssm_scan(g, state.ssm(layer), x, dt, w.a, b, cc, sequence_id);
+    auto * scan = ggml_ssm_scan(g, state.ssm(layer), x, dt, w.a, b, cc, sequence_id, /*K=*/1);
     const int64_t state_elements = c.mamba_state_size * inner;
     auto * next_state = ggml_view_1d(g, scan, state_elements,
         static_cast<size_t>(inner * steps) * sizeof(float));

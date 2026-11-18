@@ -75,7 +75,7 @@ PredictorOutput build_kda_predictor(
         beta = core::reshape_tensor(ctx, beta, core::TensorShape::from_dims({1, 1, N, 1}));
         auto state = core::reshape_tensor(ctx, recurrent[l], core::TensorShape::from_dims({1, 1, C * D}));
         auto delta = core::wrap_tensor(ggml_gated_delta_net(ctx.ggml, qkv[0].tensor, qkv[1].tensor,
-            qkv[2].tensor, forget.tensor, beta.tensor, state.tensor),
+            qkv[2].tensor, forget.tensor, beta.tensor, state.tensor, /*K=*/1),
             core::TensorShape::from_dims({1 + D, C}), GGML_TYPE_F32);
         auto output = modules::SliceModule({0, 0, 1}).build(ctx, delta);
         auto next_state = modules::SliceModule({0, 1, D}).build(ctx, delta);

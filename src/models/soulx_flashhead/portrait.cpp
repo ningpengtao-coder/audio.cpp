@@ -12,7 +12,7 @@
 #endif
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
-#include "../../../external/ggml/examples/stb_image.h"
+#include "stb_image.h"
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
 #endif

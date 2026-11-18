@@ -387,7 +387,7 @@ private:
             16 * sizeof(float), parameters->nb[1], parameters->nb[2], 20 * sizeof(float));
         auto * scan = ggml_ssm_scan(ctx.ggml, state,
             core::reshape_tensor(ctx, value, TensorShape::from_dims({batch, length, 256, 1})).tensor, dt,
-            weights_.at(prefix + ".A_log").tensor, b, c, ids);
+            weights_.at(prefix + ".A_log").tensor, b, c, ids, /*K=*/1);
         if (ctx.backend_type == core::BackendType::Cuda) {
             ggml_ssm_scan_set_fusion(scan, GGML_SSM_SCAN_FUSION_GATE);
         } else if (ctx.backend_type == core::BackendType::Metal) {
