@@ -128,7 +128,7 @@ void scan(ggml_backend_t backend, int channels, int tokens, int rank, bool strid
         // original strided, offset parameter tensor and is checked against double.
         return vulkan ? ggml_cont(ctx, view) : view;
     };
-    auto * old_scan = ggml_ssm_scan(ctx, s, x, dt, a, bc(rank), bc(rank + states), ids);
+    auto * old_scan = ggml_ssm_scan(ctx, s, x, dt, a, bc(rank), bc(rank + states), ids, /*K=*/1);
     ggml_ssm_scan_set_lowering(old_scan, GGML_SSM_SCAN_LOWERING_METAL_REGISTER16);
     auto * old_y = ggml_view_3d(ctx, old_scan, channels, tokens, batch, channels*sizeof(float), channels*tokens*sizeof(float), 0);
     auto * x3 = ggml_view_3d(ctx, x, channels, tokens, batch, x->nb[2], x->nb[3], 0);

@@ -37,7 +37,7 @@ void check(ggml_backend_t backend, int states, int tokens, bool mamba1, bool str
             states * sizeof(float), pitch * sizeof(float), pitch * tokens * sizeof(float), offset * sizeof(float));
     };
     auto * ids = ggml_new_tensor_1d(ctx, GGML_TYPE_I32, batch);
-    auto * out = ggml_ssm_scan(ctx, s, x, dt, a, view(bb), view(cb), ids);
+    auto * out = ggml_ssm_scan(ctx, s, x, dt, a, view(bb), view(cb), ids, /*K=*/1);
     ggml_ssm_scan_set_lowering(out, lowering);
     auto * graph = ggml_new_graph(ctx);
     ggml_build_forward_expand(graph, out);

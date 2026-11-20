@@ -38,7 +38,7 @@ int main(int argc, char ** argv) {
             states * sizeof(float), bc->nb[1], bc->nb[2], 20 * sizeof(float));
         auto * ids = ggml_new_tensor_1d(ctx.get(), GGML_TYPE_I32, batch);
         auto * out = ggml_ssm_scan(ctx.get(), s, x, dt, a,
-            contiguous ? ggml_cont(ctx.get(), b) : b, contiguous ? ggml_cont(ctx.get(), c) : c, ids);
+            contiguous ? ggml_cont(ctx.get(), b) : b, contiguous ? ggml_cont(ctx.get(), c) : c, ids, /*K=*/1);
         auto * graph = ggml_new_graph(ctx.get());
         ggml_build_forward_expand(graph, out);
         std::unique_ptr<ggml_backend_buffer, decltype(&ggml_backend_buffer_free)> buffer(

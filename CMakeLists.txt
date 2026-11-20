@@ -167,13 +167,31 @@ option(ENGINE_BUILD_MODEL_TESTS "Build model-specific tests and probes" OFF)
 option(ENGINE_BUILD_WARMBENCH "Build warmbench helper binaries" OFF)
 option(AUDIOCPP_BUILD_C_API "Build the C ABI (include/audiocpp.h) as a shared library" OFF)
 option(AUDIOCPP_BUILD_C_API_STATIC "Also build the C ABI as a static library (libaudiocpp.a) for embedding" OFF)
+option(AUDIOCPP_CUDA_STATIC_RUNTIME
+    "Link the CUDA runtime statically so the runtime does not depend on cudart DLLs" OFF)
+option(AUDIOCPP_CUDA_NO_CUBLAS
+    "Build the CUDA backend with bundled GEMM kernels instead of cuBLAS" OFF)
 set(AUDIOCPP_C_API_MODEL_ROOT "" CACHE PATH
     "Models root for the C API model test. Unset leaves the test registered but skipping.")
 set(AUDIOCPP_RKNN_TEST_ENGINE "" CACHE PATH
     "A .rknn engine compiled for the build host's SoC, for the RKNN sidecar test. Unset leaves the test registered but skipping.")
+
+if (MSVC AND AUDIOCPP_CUDA_STATIC_RUNTIME)
+    # cudart_static.lib 使用静态 CRT；整个目标也切到 /MT，避免两个 CRT 混用
+    # （链接期 LNK4098）以及跨 CRT 的堆/句柄问题。
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
+        CACHE STRING "MSVC runtime library" FORCE)
+endif()
+# 在仓库内共用 packages/ggml（https://github.com/ningpengtao-coder/ggml，
+# audio-cpp 分支）；audio.cpp 单独检出时回退到自带的 external/ggml。
 set(AUDIOCPP_GGML_SOURCE_DIR
-    "${CMAKE_CURRENT_SOURCE_DIR}/external/ggml"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../ggml"
     CACHE PATH "ggml source tree to build with AudioCPP")
+if (NOT EXISTS "${AUDIOCPP_GGML_SOURCE_DIR}/CMakeLists.txt")
+    set(AUDIOCPP_GGML_SOURCE_DIR
+        "${CMAKE_CURRENT_SOURCE_DIR}/external/ggml"
+        CACHE PATH "ggml source tree to build with AudioCPP" FORCE)
+endif()
 
 set(AUDIOCPP_GIT_SHA "unknown")
 set(AUDIOCPP_GIT_DATE "unknown")
@@ -273,6 +291,11 @@ if (ENGINE_ENABLE_CUDA AND NOT ENGINE_ENABLE_HIP)
     # first .cu file. Run this before enable_language(CUDA) because the version
     # is needed for the default arch list below.
     find_package(CUDAToolkit 12.0 REQUIRED)
+
+    if (AUDIOCPP_CUDA_STATIC_RUNTIME)
+        # 必须在 enable_language(CUDA) 之前设置，nvcc 才会链接 cudart_static。
+        set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
+    endif()
 
     # Define default CUDA architectures for every build path.
     # We stay close to llama.cpp/ggml-cuda here, unless there is a reason
@@ -402,6 +425,7 @@ set(GGML_BUILD_TESTS OFF CACHE BOOL "Do not build upstream tests" FORCE)
 set(GGML_ALL_WARNINGS OFF CACHE BOOL "Keep upstream warnings quiet in this sample" FORCE)
 set(GGML_CCACHE OFF CACHE BOOL "Do not probe for ccache in this local setup" FORCE)
 set(GGML_CUDA ${ENGINE_ENABLE_CUDA} CACHE BOOL "Build ggml with CUDA backend support" FORCE)
+set(GGML_CUDA_NO_CUBLAS ${AUDIOCPP_CUDA_NO_CUBLAS} CACHE BOOL "Build ggml CUDA backend without cuBLAS" FORCE)
 set(GGML_HIP ${ENGINE_ENABLE_HIP} CACHE BOOL "Build ggml with HIP backend support" FORCE)
 set(GGML_VULKAN ${ENGINE_ENABLE_VULKAN} CACHE BOOL "Build ggml with Vulkan backend support" FORCE)
 set(GGML_WEBGPU ${ENGINE_ENABLE_WEBGPU} CACHE BOOL "Build ggml with WebGPU backend support" FORCE)
@@ -425,6 +449,8 @@ if (NOT EXISTS "${AUDIOCPP_GGML_SOURCE_DIR}/CMakeLists.txt")
 endif()
 message(STATUS "Using ggml source: ${AUDIOCPP_GGML_SOURCE_DIR}")
 add_subdirectory("${AUDIOCPP_GGML_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/ggml")
+# 部分模型复用 ggml 自带的 examples/stb_image.h，随 ggml 源目录一起定位。
+include_directories("${AUDIOCPP_GGML_SOURCE_DIR}/examples")
 add_subdirectory(external/sentencepiece EXCLUDE_FROM_ALL)
 
 add_compile_options(
@@ -3253,19 +3279,37 @@ endif()
 
 if (ENGINE_ENABLE_CUDA AND NOT ENGINE_ENABLE_HIP)
     target_sources(engine_runtime PRIVATE
-        src/framework/audio/istft_cuda_runtime.cu
         src/framework/sampling/torch_random_cuda_runtime.cu
     )
     set_source_files_properties(
-        src/framework/audio/istft_cuda_runtime.cu
         src/framework/sampling/torch_random_cuda_runtime.cu
         PROPERTIES
         CUDA_STANDARD 17
         CUDA_STANDARD_REQUIRED ON
     )
-    target_compile_definitions(engine_core PRIVATE ENGINE_HAS_CUDA_ISTFT=1 ENGINE_HAS_CUDA_TORCH_RANDOM=1)
-    target_compile_definitions(engine_runtime PUBLIC ENGINE_HAS_CUDA_ISTFT=1 ENGINE_HAS_CUDA_TORCH_RANDOM=1)
-    target_link_libraries(engine_runtime PRIVATE CUDA::cudart CUDA::cufft)
+    target_compile_definitions(engine_core PRIVATE ENGINE_HAS_CUDA_TORCH_RANDOM=1)
+    target_compile_definitions(engine_runtime PUBLIC ENGINE_HAS_CUDA_TORCH_RANDOM=1)
+    if (AUDIOCPP_CUDA_NO_CUBLAS)
+        # 不引入 cuFFT：iSTFT 回退到 CPU 实现，产物无需 cufft64_*.dll。
+        if (AUDIOCPP_CUDA_STATIC_RUNTIME)
+            target_link_libraries(engine_runtime PRIVATE CUDA::cudart_static)
+        else()
+            target_link_libraries(engine_runtime PRIVATE CUDA::cudart)
+        endif()
+    else()
+        target_sources(engine_runtime PRIVATE
+            src/framework/audio/istft_cuda_runtime.cu
+        )
+        set_source_files_properties(
+            src/framework/audio/istft_cuda_runtime.cu
+            PROPERTIES
+            CUDA_STANDARD 17
+            CUDA_STANDARD_REQUIRED ON
+        )
+        target_compile_definitions(engine_core PRIVATE ENGINE_HAS_CUDA_ISTFT=1)
+        target_compile_definitions(engine_runtime PUBLIC ENGINE_HAS_CUDA_ISTFT=1)
+        target_link_libraries(engine_runtime PRIVATE CUDA::cudart CUDA::cufft)
+    endif()
 endif()
 
 # Windows decodes narrow strings - argv, file paths, console output - with the
@@ -3865,9 +3909,9 @@ if (ENGINE_BUILD_TESTS OR ENGINE_BUILD_EXTENDED_TESTS OR ENGINE_BUILD_MODEL_TEST
         target_include_directories(nemotron_asr_webgpu_rnnt_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests/unittests)
     endif()
 
-    if (ENGINE_ENABLE_WEBGPU)
-        # Reuse GGML's CPU-reference operator harness for the opt-in backend.
-        add_executable(test-backend-ops external/ggml/tests/test-backend-ops.cpp)
+    if (ENGINE_ENABLE_WEBGPU OR ENGINE_ENABLE_CUDA OR ENGINE_ENABLE_HIP)
+        # Reuse GGML's CPU-reference operator harness for the opt-in GPU backends.
+        add_executable(test-backend-ops ${AUDIOCPP_GGML_SOURCE_DIR}/tests/test-backend-ops.cpp)
         target_link_libraries(test-backend-ops PRIVATE ggml Threads::Threads)
     endif()
 
@@ -3961,7 +4005,7 @@ if (ENGINE_BUILD_TESTS OR ENGINE_BUILD_EXTENDED_TESTS OR ENGINE_BUILD_MODEL_TEST
         --log ${CMAKE_CURRENT_BINARY_DIR}/dit_runtime_test.log)
     add_engine_unittest(prepared_graph_test tests/unittests/test_prepared_graph.cpp)
     target_sources(prepared_graph_test PRIVATE tests/unittests/test_allocation_failure.cpp)
-    target_include_directories(prepared_graph_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/ggml/src)
+    target_include_directories(prepared_graph_test PRIVATE ${AUDIOCPP_GGML_SOURCE_DIR}/src)
     add_test(NAME prepared_graph_test COMMAND prepared_graph_test
         --log ${CMAKE_CURRENT_BINARY_DIR}/prepared_graph_test.log)
     add_engine_unittest(rope_transformer_encoder_test tests/unittests/test_rope_transformer_encoder.cpp)
@@ -4626,7 +4670,7 @@ if (ENGINE_BUILD_TESTS OR ENGINE_BUILD_EXTENDED_TESTS OR ENGINE_BUILD_MODEL_TEST
         add_test(NAME quantize_chunking_test COMMAND quantize_chunking_test)
 
         add_engine_unittest(tq2_1_test tests/unittests/test_tq2_1.cpp)
-        target_include_directories(tq2_1_test PRIVATE external/ggml/src)
+        target_include_directories(tq2_1_test PRIVATE ${AUDIOCPP_GGML_SOURCE_DIR}/src)
         add_test(NAME tq2_1_test COMMAND tq2_1_test)
 
         add_engine_unittest(moss_ttsd_speakers_test tests/unittests/test_moss_ttsd_speakers.cpp)
@@ -4881,10 +4925,10 @@ if (ENGINE_BUILD_TESTS OR ENGINE_BUILD_EXTENDED_TESTS OR ENGINE_BUILD_MODEL_TEST
 
         if(nemotron_transcribe IN_LIST AUDIOCPP_LINKED_MODELS)
             add_engine_unittest(nemotron_transcribe_encoder_bounds_test tests/community_models/nemotron_transcribe/encoder_bounds_test.cpp)
-            target_include_directories(nemotron_transcribe_encoder_bounds_test PRIVATE external/ggml/src)
+            target_include_directories(nemotron_transcribe_encoder_bounds_test PRIVATE ${AUDIOCPP_GGML_SOURCE_DIR}/src)
             add_test(NAME nemotron_transcribe_encoder_bounds_test COMMAND nemotron_transcribe_encoder_bounds_test)
             add_engine_unittest(nemotron_transcribe_decoder_safety_test tests/community_models/nemotron_transcribe/decoder_safety_test.cpp)
-            target_include_directories(nemotron_transcribe_decoder_safety_test PRIVATE external/ggml/src)
+            target_include_directories(nemotron_transcribe_decoder_safety_test PRIVATE ${AUDIOCPP_GGML_SOURCE_DIR}/src)
             add_test(NAME nemotron_transcribe_decoder_safety_test COMMAND nemotron_transcribe_decoder_safety_test)
             add_engine_unittest(nemotron_transcribe_decoder_padding_test tests/community_models/nemotron_transcribe/decoder_padding_test.cpp)
             add_test(NAME nemotron_transcribe_decoder_padding_test COMMAND nemotron_transcribe_decoder_padding_test)
@@ -4892,7 +4936,7 @@ if (ENGINE_BUILD_TESTS OR ENGINE_BUILD_EXTENDED_TESTS OR ENGINE_BUILD_MODEL_TEST
 
         if(fish_drama3 IN_LIST AUDIOCPP_LINKED_MODELS)
             add_engine_unittest(fish_drama3_backbone_allocation_test tests/community_models/fish_drama3/backbone_allocation_test.cpp)
-            target_include_directories(fish_drama3_backbone_allocation_test PRIVATE external/ggml/src)
+            target_include_directories(fish_drama3_backbone_allocation_test PRIVATE ${AUDIOCPP_GGML_SOURCE_DIR}/src)
             add_test(NAME fish_drama3_backbone_allocation_test COMMAND fish_drama3_backbone_allocation_test)
             add_engine_unittest(fish_drama3_codec_source_test tests/community_models/fish_drama3/codec_source_test.cpp)
             add_test(NAME fish_drama3_codec_source_test COMMAND fish_drama3_codec_source_test)
